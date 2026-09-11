@@ -4,6 +4,8 @@
 
 Supporting research notes with sources live in [`docs/research/`](research/). Every factual claim below is traceable to one of those notes; items the research could not verify against a primary source are marked **(uncertain)**.
 
+**Contents:** [0. Executive summary](#0-executive-summary) · [1. Requirements](#1-what-jarvis-means-here-requirements-non-goals-success-metrics) · [2. Research findings](#2-what-the-research-found-and-what-to-design-against) · [3. Architecture](#3-target-architecture) · [4. Component decisions](#4-component-decisions) · [5. Hardware](#5-hardware-plan) · [6. Security and privacy](#6-security-privacy-and-permissions) · [7. Latency budget](#7-latency-budget-conversational-turn-prosumer-tier-local-speech--claude-sonnet-5) · [8. Cost model](#8-cost-model) · [9. Roadmap](#9-implementation-roadmap) · [10. Observability and evaluation](#10-observability-and-evaluation) · [11. Risks](#11-risks-uncertainties-and-open-questions) · [12. Appendix](#12-appendix)
+
 ---
 
 ## 0. Executive summary
@@ -243,8 +245,38 @@ Home Assistant stays the system of record for devices, areas, users, automations
 - Music Assistant for whole-home audio; Frigate for cameras; Matter Server on matter.js (Matter 1.5.1) for Matter/Thread devices.
 - Note the 2026.9 breaking change: LLM tool names are domain-prefixed (`intent__HassTurnOn`).
 
+### 4.10 Vision and presence ("eyes")
 
-<!-- SECTIONS 4.10-4.12 AND 6 PENDING -->
+| Capability | Choice | Why |
+|---|---|---|
+| Camera detection, faces, plates, search | **Frigate 0.17/0.18** on an Intel N150 box with OpenVINO (Hailo-8 when scaling): object detection, face recognition (ArcFace on GPU/NPU; 20–30 enrolment images per person; thresholds 0.7/0.8/0.9), LPR, semantic search (Jina CLIP), GenAI review summaries returning structured JSON with `confidence` and `threat_level` | Verified in Frigate docs; the structured fields are natural gates for proactive alerts; Coral cannot accelerate these enrichments |
+| Local scene description / camera Q&A | **Qwen3-VL** (Apache-2.0; 8B or 30B-A3B) or **Gemma 4** via llama.cpp `--mmproj` on the brain box | Frigate's own recommendation; keeps images local |
+| "Look at this" from a phone or glasses | Sonnet 5 vision (image input is native) for hard questions; Gemini 3.1 Flash Live at 1 fps only when the user explicitly asks it to watch | Cloud vision is opt-in per request |
+| Presence | mmWave sensors per room (Everything Presence Lite/One, Aqara FP2) + satellite state | Gates proactive speech; drives room-aware routing |
+| Wearable HUD (optional, Phase 6) | **MentraOS** (Apache-2.0) on Even Realities G2 / Mentra Live / Vuzix Z100, or Brilliant Labs Halo | Open SDK with mic, camera, display; Meta Ray-Ban Display's third-party toolkit is a developer preview with undated GA and unclear assistant replacement **(uncertain)** |
+
+Face and voice recognition are biometric processing: enrolment is explicit and per person, guests are never enrolled, and a guest mode disables recognition (see section 6).
+
+### 4.11 Clients and access
+
+| Surface | Implementation |
+|---|---|
+| Rooms | Satellites (4.1) |
+| Desktop | OHF linux-voice-assistant (wake word, ESPHome protocol) + a **web dashboard/PWA** served by the brain: live transcript, tool-call log, pending confirmations (accept / edit / deny), memory browser, per-user settings |
+| Phone | Home Assistant Companion (Android: default assistant app, on-device microWakeWord since 2026.2.3; iOS: Siri Shortcut → Assist, noting the default-agent limitation in core #108503); the PWA over Tailscale for transcripts and confirmations; push notifications for approvals |
+| Phone call (optional) | Home Assistant `voip` + Grandstream HT801, the community VoIP Stack (2026.9), or OpenAI Realtime SIP attach |
+| Remote access | **Tailscale** (or Cloudflare Tunnel behind Zero Trust); nothing on the public internet |
+| Messaging | Telegram/Signal bot for text conversations and approvals when away |
+
+### 4.12 Proactive behavior (ambient agent)
+
+Pattern (from LangChain's ambient-agents design and Home Assistant's satellite APIs): every event is **triaged** into ignore / notify / respond; only "notify" and "respond" reach a human, and "respond" actions go through the approval inbox.
+
+- **Event sources:** HA state changes (door, garage, leak, power), Frigate review summaries (`threat_level` ≥ 1, `confidence` ≥ 0.7), calendar (next event in 30 min, conflicts, travel time), email (flagged senders), package delivery, weather alerts, device health (battery, offline), memory-derived reminders.
+- **Delivery:** `assist_satellite.announce` (pre-announce chime, 20 dB ducking) in the room where presence is detected and the satellite is `idle`; `start_conversation` with `extra_system_prompt` when a reply is useful ("Your 3 pm moved to 4; should I tell Alex?"); phone push when nobody is home; `ai_task.generate_data` for the morning briefing (calendar, weather, commute, news, overnight camera events).
+- **Anti-annoyance rules:** notification classes with fixed importance levels the household can edit; quiet hours; per-class daily caps; no speaking when a conversation is in progress; a "why did you say that" log; never escalate silently.
+- **Scheduling:** HA time/state/timer triggers for home events; the agent harness's own scheduler (or Claude Code Routines-style cron) for personal-agent jobs like inbox triage.
+
 ---
 
 ## 5. Hardware plan
@@ -290,6 +322,28 @@ Run Home Assistant OS in a VM (Proxmox) or HA Container on the same box, or on a
 | **Budget** | Existing PC + used RTX 3090 ($700–1,050) | 2 × Voice PE ($118), 1–2 × Presence Lite ($34–76) | HA on same PC; consumer router | **≈ $900–1,400**; idle 40–80 W |
 | **Prosumer (recommended)** | DGX Spark partner box ($3,699–4,699) or Strix Halo ($2,000–3,450) | 4–6 × Voice PE / 2 × Satellite1 ($450–600), 3 × presence (~$180) | N150 Frigate box ($309–339) + 2–4 PoE cams, PoE switch + UPS ($500–800) | **≈ $4,500–6,500** |
 | **No-compromise** | Mac Studio M5 Ultra 512 GB (~$9–10k, uncertain) or RTX PRO 6000 build ($10–13k) or 2 × DGX Spark | Satellite1 in every room (6–8 × $135), desktop clients | Frigate on Hailo-8/TensorRT, 6–8 cams ($1,500–2,500), e-ink per floor, rack UPS, Proxmox cluster | **≈ $12,000–20,000+** |
+
+---
+
+## 6. Security, privacy and permissions
+
+### 6.1 Threat model
+An always-listening assistant with account access faces: (1) **indirect prompt injection** through email, calendar invites, web pages and phone notifications (demonstrated against Gemini on Android and Microsoft 365 Copilot in 2025–2026); (2) **memory poisoning** via the same channels; (3) **acoustic attacks** (someone shouting through a window, TV audio triggering the wake word); (4) **LAN compromise** (Wyoming is unauthenticated by design); (5) **cloud data exposure** (transcripts at API providers); (6) **biometric misuse** (voice/face data on household members and guests); (7) **operator error** (a model that "fabricates tool-call success", HA issue #177156).
+
+### 6.2 Controls
+
+| Control | Implementation |
+|---|---|
+| **Tiered permissions in the harness, not the prompt** | Claude Agent SDK rules (deny → ask → allow) or Pydantic AI deferred tools. **Allow:** reads, lights, media, timers, climate within bounds. **Ask (spoken or push confirmation):** locks, garage, alarm, boiler, purchases, sending messages/emails, deleting data, calendar changes affecting others. **Deny:** money movement, credential entry, anything outside allow-listed domains. Per-user overrides: children cannot unlock or buy; guests are read-only. |
+| **Untrusted-content isolation** | Email bodies, web pages, calendar descriptions, notifications and camera GenAI text are labelled as data; a turn that contains fetched content cannot trigger "ask"-tier tools without confirmation regardless of what the text says; a local model pre-screens content for instruction-like patterns before it reaches the frontier model. |
+| **Memory quarantine** | Facts extracted from untrusted content land in a pending queue and become memories only after the user confirms (voice or dashboard). |
+| **Least privilege per MCP server** | ha-mcp read-only mode + per-tool enable + approval predicates; Playwright MCP with origin allow-lists in a disposable VM; Filesystem MCP scoped roots; separate OAuth tokens per server with minimal scopes; secrets in a vault (e.g. sops/age or Vaultwarden), never in prompts. |
+| **Acoustic safeguards** | Speaker-ID gating for "ask"-tier actions (only enrolled adults can unlock); wake word disabled while media plays on that satellite unless AEC confirms; rate limits on repeated wake events. |
+| **Network** | IoT VLAN; ESPHome API encryption enabled; Wyoming only on trusted VLAN; Tailscale for remote; no port forwarding. |
+| **Cloud data handling** | Only transcripts and tool results leave the LAN; Anthropic API data deleted within 30 days (zero-data-retention available by agreement; Fable-tier models require 30-day retention); OpenAI ZDR for eligible API customers (Aug 2026); Google does not train on paid API data. Choose providers and models per that policy; keep a local-only mode switch. |
+| **Biometrics and law** | Explicit per-person enrolment for voice and face; guest mode disables recognition, memory writes and personal tools; a visible "recording" indicator per room; hardware mute (Voice PE side switch cuts mic power; LED turns red); EDPB VVA guidelines and GDPR apply once data is shared beyond the household — obtain legal advice for your jurisdiction. |
+| **Audit and rollback** | Every tool call logged with arguments, triggering content source, approver, result; ha-mcp automatic pre-edit backups; HA nightly encrypted backups (SecureTar) to NAS and off-site. |
+| **Model behavior** | Prompts require tool-result verification before claiming success; strict JSON schema tool inputs; no permissions-bypass mode ever; eval red-team set with poisoned emails/pages run before every prompt or model change. |
 
 ---
 
@@ -382,6 +436,36 @@ Each phase ends with a demo and an eval gate. Estimated effort assumes one exper
 - Phone access via SIP (HA VoIP Stack or OpenAI Realtime SIP attach).
 - Vision LLM for camera Q&A (local Qwen3-VL-class or Sonnet 5 vision).
 - Second brain box or Mac Studio M5 Ultra for larger open models; LiveKit SFU if many simultaneous clients appear.
+
+---
+
+## 10. Observability and evaluation
+
+- **Tracing:** OpenTelemetry from Pipecat (one trace per conversation; turn → STT/LLM/TTS spans; TTFB and latency breakdown in 1.9) and from the agent harness (tool calls, permission decisions) into a self-hosted **Langfuse**; metrics into Prometheus/Grafana.
+- **Dashboards:** end-to-end p50/p95, per-stage TTFB, barge-in success rate, wake-word events per hour per room (false accepts), tool success/failure by tool, tier mix and API spend, satellite health, GPU memory/temperature.
+- **Alerts:** p95 end-to-end > 1,200 ms; component TTFB > 2x baseline; wake false accepts > 1/h in any room; any "ask"-tier action executed without a recorded approval; cloud provider error rate; disk/backup failures.
+- **Evaluation sets (in `evals/`):** (1) 150-utterance home-control set across rooms, aliases, negations, multi-device and follow-ups; (2) 100-task personal-agent set (calendar, email, research with citations, reminders); (3) injection red-team set (poisoned emails, web pages, calendar invites, notification text) expecting zero unconfirmed actions; (4) 50-clip audio set (distances, noise, music playing) for wake word and STT WER; (5) latency benchmark script. Run nightly and before every model, prompt, or firmware change; Pipecat's YAML eval scenarios and audio playback drive the voice cases.
+- **Conversation logs** stay private on the LAN; per-user retention settings; a "forget this" voice command deletes the episode and derived memories.
+
+---
+
+## 11. Risks, uncertainties and open questions
+
+| Risk / uncertainty | Impact | Mitigation |
+|---|---|---|
+| Prices and model names for OpenAI, Google and xAI come from secondary sources (vendor sites were unreachable during research) | Cost estimates for non-Anthropic tiers may be off | Re-verify on vendor pricing pages before committing; Anthropic figures were verified directly |
+| DGX Spark decode figures vary 39–61 tok/s across runtimes/benchmarks; Strix Halo prefill unverified | Model tier may feel slower than planned | Benchmark on the actual box in Phase 0 before finalizing model choices; SGLang/MTP can help |
+| Mac Studio M5 Max/Ultra not yet benchmarked; 512 GB price unknown | No-compromise tier cost/perf uncertain | Wait for late-October reviews before buying |
+| Voice PE has no announced successor; firmware regressions recur | Satellite supply/stability | Buy XMOS alternatives (Satellite1, XVF3800); pin firmware |
+| Home Assistant 2026.9 renamed LLM tool names; continued conversation relies on punctuation heuristics | Prompt breakage; awkward follow-ups | Track release notes; implement follow-up mode in Pipecat rather than relying on HA's heuristic |
+| Local models remain weaker at tool calling (37% success in tests) | Offline mode degraded | Deterministic intents cover most offline needs; escalate to cloud when available |
+| Prompt injection has no complete defense ("agents may always fall for prompt injections", 2026 paper) | Real-world harm | Permissions enforced outside the model; confirmations; sandboxing; red-team evals |
+| Speaker ID accuracy in far-field, multi-speaker rooms is unproven for households | Wrong user attribution | Use it for personalization, never as sole authorization for high-risk actions; combine with presence and phone confirmation |
+| Smart-glasses and always-on wearables have immature developer access | Wearable Jarvis delayed | Phase 6 only; MentraOS as the open path |
+| Legal exposure (GDPR/ePrivacy/AI Act) if biometric data or recordings leave the household | Compliance | Explicit enrolment, guest mode, local-first, legal advice |
+| Single-engineer project mortality (the DIY norm) | Abandonment | Small, documented phases with eval gates; build on maintained frameworks and protocols |
+
+**Open questions for the owner:** which rooms and how many satellites; which calendar/email provider; whether phone-call access is wanted; the household's stance on cameras indoors; cloud-provider preference beyond Anthropic; budget tier; jurisdiction for the legal review.
 
 ---
 
