@@ -57,5 +57,6 @@ async def test_resolve_latest_and_confirmation_parsing():
     assert parse_confirmation("Yes, go ahead") is True
     assert parse_confirmation("no thanks") is False
     assert parse_confirmation("what time is it") is None
+    assert parse_confirmation("ok so what time is it in tokyo") is None
     got = e.resolve_latest(False, by="voice")
     assert got is a and a.future.result() == (False, "voice")

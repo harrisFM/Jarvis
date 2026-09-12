@@ -9,7 +9,18 @@
 
   let ws, state = {}, currentAssistant = null, speaking = false;
   const speechQueue = [];
-  const orb = $("#orb"), transcript = $("#transcript"), activity = $("#activity");
+  const orb = $("#orb"), transcript = $("#transcript"), activity = $("#activity"), readout = $("#readout");
+
+  // ---------------------------------------------------------------- boot sequence, clock, readout
+  const BOOT = ["J.A.R.V.I.S. v0.1", "Initialising cognitive core .......... OK", "Loading household policy ............ OK",
+                "Binding memory core ................. OK", "Opening secure link ................. OK", "", "Good day. All systems nominal."];
+  (async () => {
+    const el = $("#boot-text"); let out = "";
+    for (const line of BOOT) { for (const ch of line) { out += ch; el.textContent = out; await new Promise((r) => setTimeout(r, 6)); } out += "\n"; await new Promise((r) => setTimeout(r, 90)); }
+    await new Promise((r) => setTimeout(r, 350)); $("#boot").classList.add("done");
+  })();
+  setInterval(() => { $("#clock").textContent = new Date().toLocaleTimeString([], { hour12: false }); }, 1000);
+  function setReadout(text) { readout.textContent = text; }
 
   // ---------------------------------------------------------------- websocket
   function connect() {
@@ -29,21 +40,22 @@
         else if (currentAssistant) { currentAssistant.firstChild.textContent = ev.text; currentAssistant = null; }
         else addMsg("assistant", ev.text);
         break;
-      case "turn_started": orb.classList.add("thinking"); currentAssistant = addMsg("assistant", ""); break;
+      case "turn_started": orb.classList.add("thinking"); setReadout(`PROCESSING · ${ev.tier || ""}`); currentAssistant = addMsg("assistant", ""); break;
       case "assistant_delta": if (currentAssistant) currentAssistant.firstChild.textContent += ev.text; scrollBottom(); break;
       case "speak": enqueueSpeech(ev.text); break;
-      case "turn_finished": orb.classList.remove("thinking"); if (currentAssistant) { const m = currentAssistant.querySelector(".meta"); if (m) m.textContent = fmtMetric(ev); } refreshState(); break;
+      case "turn_finished": orb.classList.remove("thinking"); setReadout(ev.error ? "FAULT" : "STANDING BY"); if (currentAssistant) { const m = currentAssistant.querySelector(".meta"); if (m) m.textContent = fmtMetric(ev); } refreshState(); break;
       case "first_token": break;
       case "tool_call": logActivity(`${ev.name} <span class="${ev.status}">${ev.status}</span>${ev.input ? " " + esc(JSON.stringify(ev.input)).slice(0, 160) : ""}${ev.reason ? " — " + esc(ev.reason) : ""}`); break;
       case "tool_result": logActivity(`↳ <span class="${ev.is_error ? "err" : "allow"}">${esc(ev.result).slice(0, 200)}</span> <span class="t">${ev.duration_ms}ms</span>`); break;
-      case "approval_requested": addApproval(ev); break;
+      case "approval_requested": addApproval(ev); setReadout("AUTHORISATION REQUIRED"); break;
+      case "approval_refused": addMsg("system", `⚠ ${ev.by} is not authorised to confirm this`); break;
       case "approval_resolved": removeApproval(ev.id); logActivity(`approval ${ev.id} → ${ev.approved ? '<span class="allow">approved</span>' : '<span class="deny">denied</span>'} by ${esc(ev.by || "")}`); break;
       case "timer_fired": addMsg("system", `⏰ ${ev.speak}`); enqueueSpeech(ev.speak); refreshState(); break;
       case "timers_changed": renderTimers(ev.timers); break;
       case "todos_changed": renderTodos(ev.todos); break;
       case "memory_changed": loadMemory(); break;
       case "notification": addMsg("system", `📨 ${ev.title}: ${ev.text}`); break;
-      case "error": addMsg("system", `⚠ ${ev.text}`); orb.classList.remove("thinking"); currentAssistant = null; break;
+      case "error": addMsg("system", `⚠ ${ev.text}`); orb.classList.remove("thinking"); setReadout("FAULT"); currentAssistant = null; break;
       case "interrupted": addMsg("system", "interrupted"); orb.classList.remove("thinking"); currentAssistant = null; stopSpeaking(); break;
       case "conversation_reset": transcript.innerHTML = ""; addMsg("system", "context cleared"); break;
       case "ha_state": logActivity(`HA ${esc(ev.entity_id)} → ${esc(ev.state)}`); break;
@@ -63,17 +75,19 @@
   function logActivity(html) { const li = document.createElement("li"); li.innerHTML = `<span class="t">${new Date().toLocaleTimeString()}</span>${html}`; activity.prepend(li); while (activity.children.length > 200) activity.lastChild.remove(); }
 
   function applyState(s) {
-    state = s; $("#title").textContent = s.assistant_name;
+    state = s;
+    const title = $("#title"); if (title) title.textContent = [...s.assistant_name.toUpperCase()].join(".") + ".";
+    document.title = title ? title.textContent : s.assistant_name;
     const userSel = $("#user"); const prev = userSel.value;
     userSel.innerHTML = s.users.map((u) => `<option value="${esc(u.id)}">${esc(u.name)} (${esc(u.role)})</option>`).join("");
     if (prev) userSel.value = prev;
     const rows = [
-      ["credentials", s.credentials ? "✓ configured" : "✗ ANTHROPIC_API_KEY missing"],
+      ["core", s.credentials ? "ONLINE" : "OFFLINE — set ANTHROPIC_API_KEY"],
       ["default model", s.models.default + (s.models.fallbacks ? " · fallbacks on" : "")],
       ["fast tier", s.models.router_enabled ? s.models.fast + " (router on)" : "router off"],
       ["effort", `${s.models.effort_chat} chat / ${s.models.effort_complex} complex`],
       ["web search", s.models.web_search ? "on" : "off"],
-      ["home assistant", s.home_assistant.configured ? (s.home_assistant.online ? "✓ online" : "configured, unreachable") : "not configured"],
+      ["home link", s.home_assistant.configured ? (s.home_assistant.online ? "ONLINE" : "CONFIGURED · UNREACHABLE") : "not configured"],
       ["voice", `STT ${s.voice.stt} · TTS ${s.voice.tts} · wake "${s.voice.wake_word}"`],
       ["tools", s.tools.join(", ")],
     ];
@@ -122,11 +136,37 @@
     const u = new SpeechSynthesisUtterance(speechQueue.shift());
     const voice = speechSynthesis.getVoices().find((v) => /en-GB/i.test(v.lang) && /male|Daniel|Arthur|George/i.test(v.name)) || speechSynthesis.getVoices().find((v) => /en-GB/i.test(v.lang));
     if (voice) u.voice = voice; u.rate = 1.02;
-    speaking = true; orb.classList.add("speaking");
-    u.onend = u.onerror = () => { speaking = false; orb.classList.remove("speaking"); pumpSpeech(); };
+    speaking = true; orb.classList.add("speaking"); setReadout("SPEAKING"); startFakeWave();
+    u.onend = u.onerror = () => { speaking = false; orb.classList.remove("speaking"); if (!speechQueue.length) { setReadout("STANDING BY"); stopWave(); } pumpSpeech(); };
     speechSynthesis.speak(u);
   }
-  function stopSpeaking() { speechQueue.length = 0; if ("speechSynthesis" in window) speechSynthesis.cancel(); speaking = false; orb.classList.remove("speaking"); }
+  function stopSpeaking() { speechQueue.length = 0; if ("speechSynthesis" in window) speechSynthesis.cancel(); speaking = false; orb.classList.remove("speaking"); stopWave(); }
+
+  // ---------------------------------------------------------------- waveform (mic analyser when listening, synthetic while speaking)
+  const wave = $("#wave"), wctx = wave.getContext("2d");
+  let audioCtx = null, analyser = null, micStream = null, waveRaf = null, fakeWave = false;
+  async function startMicWave() {
+    try {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const src = audioCtx.createMediaStreamSource(micStream); analyser = audioCtx.createAnalyser(); analyser.fftSize = 256; src.connect(analyser);
+      fakeWave = false; drawWave();
+    } catch (e) { /* no mic permission: skip the visual */ }
+  }
+  function startFakeWave() { if (analyser) return; fakeWave = true; drawWave(); }
+  function stopWave() { fakeWave = false; if (micStream) { micStream.getTracks().forEach((t) => t.stop()); micStream = null; analyser = null; } if (!speaking) { cancelAnimationFrame(waveRaf); waveRaf = null; wctx.clearRect(0, 0, wave.width, wave.height); } }
+  function drawWave() {
+    cancelAnimationFrame(waveRaf);
+    const W = wave.width, H = wave.height, bars = 64, data = new Uint8Array(analyser ? analyser.frequencyBinCount : bars);
+    const frame = () => {
+      if (analyser) analyser.getByteFrequencyData(data); else if (fakeWave) { const t = performance.now() / 180; for (let i = 0; i < bars; i++) data[i] = 40 + 90 * Math.abs(Math.sin(t + i * .35)) * Math.random(); } else { return; }
+      wctx.clearRect(0, 0, W, H); const bw = W / bars;
+      for (let i = 0; i < bars; i++) { const v = data[Math.floor(i * data.length / bars)] / 255; const h = Math.max(2, v * H * .9); const x = i * bw + bw * .2;
+        wctx.fillStyle = `rgba(0, 229, 255, ${0.35 + v * .65})`; wctx.fillRect(x, H / 2 - h / 2, bw * .6, h); }
+      waveRaf = requestAnimationFrame(frame);
+    };
+    frame();
+  }
 
   // ---------------------------------------------------------------- speech in (browser STT + wake word)
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -135,8 +175,8 @@
     if (!SR) { addMsg("system", "This browser has no speech recognition. Use Chrome, or set JARVIS_STT=faster_whisper and post audio to /api/stt."); return; }
     if (rec) rec.stop();
     rec = new SR(); rec.lang = "en-GB"; rec.interimResults = true; rec.continuous = continuous;
-    rec.onstart = () => { micOn = true; $("#mic").classList.add("on"); $("#listening").hidden = false; orb.classList.add("listening"); };
-    rec.onend = () => { micOn = false; $("#mic").classList.remove("on"); $("#listening").hidden = true; orb.classList.remove("listening"); if (wakeMode) setTimeout(() => startRec(true), 300); };
+    rec.onstart = () => { micOn = true; $("#mic").classList.add("on"); $("#listening").hidden = false; orb.classList.add("listening"); setReadout(wakeMode ? `AWAITING "${(state.voice && state.voice.wake_word) || "jarvis"}"` : "LISTENING"); startMicWave(); };
+    rec.onend = () => { micOn = false; $("#mic").classList.remove("on"); $("#listening").hidden = true; orb.classList.remove("listening"); if (!speaking) { setReadout("STANDING BY"); stopWave(); } if (wakeMode) setTimeout(() => startRec(true), 300); };
     rec.onerror = (e) => { if (e.error !== "no-speech" && e.error !== "aborted") addMsg("system", "mic error: " + e.error); };
     rec.onresult = (e) => {
       let interim = "", final = "";

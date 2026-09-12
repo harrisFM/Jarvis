@@ -72,7 +72,7 @@ class MemoryStore:
     def recall(self, query: str, limit: int = 8, confirmed_only: bool = True) -> list[dict[str, Any]]:
         q = " OR ".join(_fts_terms(query))
         if not q:
-            return self.list_facts(limit=limit)
+            return self.list_facts(limit=limit, include_pending=not confirmed_only)
         where = "AND f.confirmed=1" if confirmed_only else ""
         rows = self.conn.execute(
             f"""SELECT f.id, f.ts, f.user_id, f.category, f.text, f.source, f.confirmed, bm25(facts_fts) AS score

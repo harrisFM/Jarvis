@@ -93,13 +93,19 @@ class Agent:
         if self.permissions.pending:
             answer = parse_confirmation(text)
             if answer is not None:
-                approval = self.permissions.resolve_latest(answer, by=f"voice:{user.id}")
-                if approval is not None:
+                latest = self.permissions.pending[next(reversed(self.permissions.pending))]
+                turn.tier = "confirmation"
+                if self._may_confirm(user, latest):
+                    self.permissions.resolve(latest.id, answer, by=f"voice:{user.id}")  # waiter publishes approval_resolved
                     turn.reply = "Understood." if answer else "Cancelled."
-                    turn.tier = "confirmation"
-                    turn.total_ms = (time.perf_counter() - started) * 1000
-                    await self.bus.publish("approval_resolved", id=approval.id, approved=answer, by=user.name)
-                    return turn
+                else:
+                    turn.reply = f"Only {latest.user.name} or another adult can confirm that."
+                    await self.bus.publish("approval_refused", id=latest.id, by=user.name,
+                                           reason="insufficient role to confirm")
+                await self.bus.publish("speak", text=turn.reply, turn=turn.id)
+                await self.bus.publish("transcript", role="assistant", text=turn.reply, turn=turn.id)
+                turn.total_ms = (time.perf_counter() - started) * 1000
+                return turn
 
         if self.client is None:
             turn.error = "No Anthropic credentials configured (set ANTHROPIC_API_KEY)."
@@ -138,6 +144,15 @@ class Agent:
         if turn.reply:
             self.memory.log_turn(session, user.id, room, "assistant", turn.reply)
         return turn
+
+    def _may_confirm(self, user: User, approval: Any) -> bool:
+        """The requester, or anyone of equal/higher rank who is not themselves denied that action, may answer."""
+        if user.id == approval.user.id:
+            return True
+        if user.rank < approval.user.rank:
+            return False
+        decision, _ = self.permissions.decide(approval.tool, approval.tool_input, user)
+        return decision != Decision.DENY
 
     def reset(self) -> None:
         self.history.clear()

@@ -3,72 +3,94 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Jarvis</title>
+<title>J.A.R.V.I.S.</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='13' fill='none' stroke='%2300e5ff' stroke-width='2'/%3E%3Ccircle cx='16' cy='16' r='6' fill='%2300e5ff'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-<header class="top">
-  <div class="brand"><span class="orb" id="orb"></span><h1 id="title">Jarvis</h1><span class="badge" id="conn">connecting…</span></div>
+<div class="scanlines" aria-hidden="true"></div>
+<div id="boot" class="boot" aria-hidden="true"><pre id="boot-text"></pre></div>
+
+<header class="hud-top">
+  <div class="brand">
+    <div class="wordmark"><span class="letters" id="title">J.A.R.V.I.S.</span><span class="sub">Just A Rather Very Intelligent System</span></div>
+    <span class="badge" id="conn">LINK…</span>
+  </div>
   <div class="controls">
-    <label>User <select id="user"></select></label>
-    <label>Room <select id="room">
-      <option>office</option><option>kitchen</option><option>living room</option><option>bedroom</option><option>hallway</option>
+    <label>USER <select id="user"></select></label>
+    <label>ROOM <select id="room">
+      <option>office</option><option>kitchen</option><option>living room</option><option>bedroom</option><option>hallway</option><option>workshop</option>
     </select></label>
-    <label class="chk"><input type="checkbox" id="tts" checked> speak replies</label>
-    <label class="chk"><input type="checkbox" id="wake"> wake word</label>
+    <label class="chk"><input type="checkbox" id="tts" checked> VOICE OUT</label>
+    <label class="chk"><input type="checkbox" id="wake"> WAKE WORD</label>
   </div>
 </header>
 
-<main class="grid">
-  <section class="panel conv">
-    <div class="panel-head"><h2>Conversation</h2>
-      <div><button id="reset" class="ghost" title="Clear the model's context">reset</button></div>
+<main class="hud">
+  <!-- left column -->
+  <aside class="col left">
+    <section class="panel frame status">
+      <div class="panel-head"><h2>Systems</h2><span class="tick" id="clock">--:--:--</span></div>
+      <table class="kv" id="status-table"></table>
+    </section>
+    <section class="panel frame approvals">
+      <div class="panel-head"><h2>Authorisation required</h2><span class="count zero" id="approval-count">0</span></div>
+      <div id="approvals" class="cards"><p class="empty">No pending actions. Unlocking, messaging and deletions hold here for your word.</p></div>
+    </section>
+    <section class="panel frame timers">
+      <div class="panel-head"><h2>Timers &amp; list</h2></div>
+      <ul id="timers" class="plain"></ul>
+      <ul id="todos" class="plain"></ul>
+    </section>
+  </aside>
+
+  <!-- centre: reactor + conversation -->
+  <section class="col centre">
+    <div class="reactor-wrap">
+      <div class="reactor" id="orb">
+        <div class="ring r1"></div><div class="ring r2"></div><div class="ring r3"></div>
+        <div class="ticks"></div>
+        <div class="core"></div>
+      </div>
+      <canvas id="wave" class="wave" width="640" height="80" aria-hidden="true"></canvas>
+      <div class="readout" id="readout">STANDING BY</div>
     </div>
-    <div id="transcript" class="transcript" aria-live="polite"></div>
-    <form id="composer" class="composer">
-      <button type="button" id="mic" class="mic" title="Hold to talk (or click to toggle)">🎙</button>
-      <input id="text" autocomplete="off" placeholder="Type, or press the mic and speak…">
-      <button type="submit">Send</button>
-      <button type="button" id="stop" class="ghost" title="Interrupt">■</button>
-    </form>
-    <div id="listening" class="listening" hidden>listening… <span id="interim"></span></div>
+    <section class="panel frame conv">
+      <div class="panel-head"><h2>Conversation</h2><button id="reset" class="ghost" title="Clear the model's context">PURGE CONTEXT</button></div>
+      <div id="transcript" class="transcript" aria-live="polite"></div>
+      <form id="composer" class="composer">
+        <button type="button" id="mic" class="mic" title="Click to talk">◉</button>
+        <input id="text" autocomplete="off" placeholder="Speak, or type an instruction…">
+        <button type="submit">SEND</button>
+        <button type="button" id="stop" class="ghost" title="Interrupt">■</button>
+      </form>
+      <div id="listening" class="listening" hidden>LISTENING <span id="interim"></span></div>
+    </section>
   </section>
 
-  <section class="panel approvals">
-    <div class="panel-head"><h2>Needs your OK</h2><span class="count" id="approval-count">0</span></div>
-    <div id="approvals" class="cards"><p class="empty">Nothing waiting. Actions that unlock, message, or delete stop here first.</p></div>
-  </section>
+  <!-- right column -->
+  <aside class="col right">
+    <section class="panel frame activity">
+      <div class="panel-head"><h2>Activity</h2><button class="ghost" id="clear-activity">CLEAR</button></div>
+      <ul id="activity" class="log"></ul>
+    </section>
+    <section class="panel frame memory">
+      <div class="panel-head"><h2>Memory core</h2>
+        <form id="mem-search" class="inline"><input id="mem-q" placeholder="search"><button class="ghost">GO</button></form>
+      </div>
+      <form id="mem-add" class="inline"><input id="mem-text" placeholder="add a fact…"><select id="mem-cat">
+        <option>general</option><option>preference</option><option>person</option><option>place</option><option>routine</option><option>reminder</option>
+      </select><button>STORE</button></form>
+      <ul id="facts" class="plain"></ul>
+    </section>
+  </aside>
 
-  <section class="panel status">
-    <div class="panel-head"><h2>Status</h2></div>
-    <table class="kv" id="status-table"></table>
-  </section>
-
-  <section class="panel activity">
-    <div class="panel-head"><h2>Activity</h2><button class="ghost" id="clear-activity">clear</button></div>
-    <ul id="activity" class="log"></ul>
-  </section>
-
-  <section class="panel timers">
-    <div class="panel-head"><h2>Timers &amp; list</h2></div>
-    <ul id="timers" class="plain"></ul>
-    <ul id="todos" class="plain"></ul>
-  </section>
-
-  <section class="panel memory">
-    <div class="panel-head"><h2>Memory</h2>
-      <form id="mem-search" class="inline"><input id="mem-q" placeholder="search memories"><button class="ghost">go</button></form>
-    </div>
-    <form id="mem-add" class="inline"><input id="mem-text" placeholder="add a fact…"><select id="mem-cat">
-      <option>general</option><option>preference</option><option>person</option><option>place</option><option>routine</option><option>reminder</option>
-    </select><button>remember</button></form>
-    <ul id="facts" class="plain"></ul>
-  </section>
-
-  <section class="panel metrics">
-    <div class="panel-head"><h2>Last turns</h2></div>
+  <section class="panel frame metrics">
+    <div class="panel-head"><h2>Telemetry — last turns</h2></div>
     <table class="metrics-table" id="metrics">
-      <thead><tr><th>model</th><th>tier</th><th>TTFT</th><th>total</th><th>in</th><th>out</th><th>cache</th><th>tools</th></tr></thead>
+      <thead><tr><th>model</th><th>tier</th><th>first token</th><th>total</th><th>tokens in</th><th>tokens out</th><th>cache</th><th>tools</th></tr></thead>
       <tbody></tbody>
     </table>
   </section>

@@ -18,7 +18,7 @@ from jarvis.config import Settings, load_settings
 from jarvis.events import EventBus
 from jarvis.memory.store import MemoryStore
 from jarvis.policy.audit import AuditLog
-from jarvis.policy.permissions import PermissionEngine, User
+from jarvis.policy.permissions import PermissionEngine, User, parse_confirmation
 from jarvis.tools.basic import TimerService, register_basic_tools
 from jarvis.tools.home_assistant import HomeAssistantClient, register_home_assistant_tools
 from jarvis.tools.registry import ToolRegistry
@@ -90,7 +90,13 @@ class JarvisRuntime:
             await self.ha.aclose()
 
     async def submit(self, msg: MessageIn) -> str:
-        """Queue a user message; turns run one at a time (a household has one conversation)."""
+        """Queue a user message; turns run one at a time (a household has one conversation).
+
+        A bare yes/no while an approval is pending must not wait behind the turn that is blocked on that
+        approval, so it is handled immediately instead of queued."""
+        if self.permissions.pending and parse_confirmation(msg.text) is not None:
+            await self.agent.handle(msg.text, self.resolve_user(msg.user_id), room=msg.room)
+            return "answered"
         fut: asyncio.Future = asyncio.get_event_loop().create_future()
         await self._queue.put((msg, fut))
         return "queued"
@@ -172,8 +178,8 @@ def create_app(settings: Settings | None = None, client: Any | None = None) -> F
 
     @app.get("/static/{name}")
     async def static(name: str) -> FileResponse:
-        path = (STATIC / name).resolve()
-        if STATIC.resolve() not in path.parents or not path.exists():
+        path = STATIC / Path(name).name  # single path segment only; the router already rejects '/'
+        if not path.is_file():
             raise HTTPException(404)
         return FileResponse(path)
 

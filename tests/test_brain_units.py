@@ -33,4 +33,7 @@ def test_router_fast_tier_when_enabled():
     s = Settings(JARVIS_ROUTER_ENABLED=True, _env_file=None)
     r = route("turn on the kitchen lights", s)
     assert r.model == s.model_fast and r.tier == "fast"
+    long_cmd = "turn on the kitchen lights and the hallway lamp and the porch light please thanks"
+    assert route(long_cmd, s).tier == "fast"  # >8 words: only the device-control regex can pick the fast tier
+    assert route("something quite long that is not a command at all and rambles on for a while", s).tier == "default"
     assert route("turn on the kitchen lights", s, force="default").tier == "default"

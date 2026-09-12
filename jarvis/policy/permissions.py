@@ -172,7 +172,7 @@ NO_WORDS = {"no", "nope", "don't", "do not", "cancel", "stop", "never mind", "de
 def parse_confirmation(text: str) -> bool | None:
     """Classify a short utterance as yes / no / neither. Only the first few words matter."""
     t = " ".join("".join(ch if ch.isalnum() or ch in "' " else " " for ch in text.lower()).split())
-    if not t:
+    if not t or len(t.split()) > 5:  # "ok so what time is it" is a new request, not an answer
         return None
     head = " ".join(t.split()[:3])
     for words, value in ((YES_WORDS, True), (NO_WORDS, False)):
