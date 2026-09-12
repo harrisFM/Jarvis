@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jarvis</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand"><span class="orb" id="orb"></span><h1 id="title">Jarvis</h1><span class="badge" id="conn">connecting…</span></div>
+  <div class="controls">
+    <label>User <select id="user"></select></label>
+    <label>Room <select id="room">
+      <option>office</option><option>kitchen</option><option>living room</option><option>bedroom</option><option>hallway</option>
+    </select></label>
+    <label class="chk"><input type="checkbox" id="tts" checked> speak replies</label>
+    <label class="chk"><input type="checkbox" id="wake"> wake word</label>
+  </div>
+</header>
+
+<main class="grid">
+  <section class="panel conv">
+    <div class="panel-head"><h2>Conversation</h2>
+      <div><button id="reset" class="ghost" title="Clear the model's context">reset</button></div>
+    </div>
+    <div id="transcript" class="transcript" aria-live="polite"></div>
+    <form id="composer" class="composer">
+      <button type="button" id="mic" class="mic" title="Hold to talk (or click to toggle)">🎙</button>
+      <input id="text" autocomplete="off" placeholder="Type, or press the mic and speak…">
+      <button type="submit">Send</button>
+      <button type="button" id="stop" class="ghost" title="Interrupt">■</button>
+    </form>
+    <div id="listening" class="listening" hidden>listening… <span id="interim"></span></div>
+  </section>
+
+  <section class="panel approvals">
+    <div class="panel-head"><h2>Needs your OK</h2><span class="count" id="approval-count">0</span></div>
+    <div id="approvals" class="cards"><p class="empty">Nothing waiting. Actions that unlock, message, or delete stop here first.</p></div>
+  </section>
+
+  <section class="panel status">
+    <div class="panel-head"><h2>Status</h2></div>
+    <table class="kv" id="status-table"></table>
+  </section>
+
+  <section class="panel activity">
+    <div class="panel-head"><h2>Activity</h2><button class="ghost" id="clear-activity">clear</button></div>
+    <ul id="activity" class="log"></ul>
+  </section>
+
+  <section class="panel timers">
+    <div class="panel-head"><h2>Timers &amp; list</h2></div>
+    <ul id="timers" class="plain"></ul>
+    <ul id="todos" class="plain"></ul>
+  </section>
+
+  <section class="panel memory">
+    <div class="panel-head"><h2>Memory</h2>
+      <form id="mem-search" class="inline"><input id="mem-q" placeholder="search memories"><button class="ghost">go</button></form>
+    </div>
+    <form id="mem-add" class="inline"><input id="mem-text" placeholder="add a fact…"><select id="mem-cat">
+      <option>general</option><option>preference</option><option>person</option><option>place</option><option>routine</option><option>reminder</option>
+    </select><button>remember</button></form>
+    <ul id="facts" class="plain"></ul>
+  </section>
+
+  <section class="panel metrics">
+    <div class="panel-head"><h2>Last turns</h2></div>
+    <table class="metrics-table" id="metrics">
+      <thead><tr><th>model</th><th>tier</th><th>TTFT</th><th>total</th><th>in</th><th>out</th><th>cache</th><th>tools</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </section>
+</main>
+<script src="/static/app.js"></script>
+</body>
+</html>

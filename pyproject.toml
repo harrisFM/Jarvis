@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jarvis"
+version = "0.1.0"
+description = "Jarvis: a self-hosted, voice-first personal AI assistant with a live dashboard"
+requires-python = ">=3.11"
+dependencies = [
+  "anthropic>=1.5.0",
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.30",
+  "httpx>=0.27",
+  "pydantic>=2.7",
+  "pydantic-settings>=2.3",
+  "websockets>=12",
+  "python-multipart>=0.0.9",
+]
+
+[project.optional-dependencies]
+voice-local = ["faster-whisper>=1.1", "kokoro>=0.9", "soundfile>=0.12", "numpy"]
+dev = ["pytest>=8", "pytest-asyncio>=0.23", "ruff>=0.5"]
+
+[project.scripts]
+jarvis = "jarvis.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["jarvis*"]
+
+[tool.setuptools.package-data]
+"jarvis.server" = ["static/*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
